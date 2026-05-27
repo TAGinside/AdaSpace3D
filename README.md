@@ -41,11 +41,13 @@ This is also the place where we hang out to talk, make suggestions, and dream ab
 ## 🛠️ Hardware Support
 
 This firmware is designed for the **Adafruit QT Py RP2040**, but will possibly work on other RP2040 boards with possible minor pin changes.
+The current project mapping keeps the four original QT Py buttons and adds extra named functions through an **MCP23017** expander. The MCP23017 mapping currently defines **11 additional buttons**, bringing the configured total to **15 buttons** like 3D SpaceMouse PRO Wireless.
 
 | Component | Pin (Default) | Notes |
 | :--- | :--- | :--- |
 | **Sensor** | **TLx493D** | Auto-detects on `Wire1` (Stemma) or `Wire` (Solder). |
-| **Buttons** | A0, A1, A2, A3 | Mapped to HID Buttons 13, 14, 15, 16. |
+| **QT Py local buttons** | A0, A1, A2, A3 | Mapped to HID Buttons 13, 14, 15, 16. |
+| **MCP23017 buttons** | A0, A1, A2, A3, A4, A5, A6, A7, B0, B1, B2 | Mapped to HID Buttons 1, 2, 27, 23, 26, 24, 25, 3, 5, 6, 9. |
 | **NeoPixel** | GPIO 4 | Addressable RGB Strip (WS2812). |
 | **Simple LED** | GPIO 3 | Standard 2-leg LED (PWM brightness). |
 
