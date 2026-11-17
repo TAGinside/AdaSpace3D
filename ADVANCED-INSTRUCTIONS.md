@@ -36,6 +36,7 @@ arduino-cli core install rp2040:rp2040
 arduino-cli lib install "Adafruit TinyUSB Library"
 arduino-cli lib install "XENSIV 3D Magnetic Sensor TLx493D"
 arduino-cli lib install "Adafruit NeoPixel"
+arduino-cli lib install "Adafruit MCP23017 Arduino Library"
 ```
 
 ---

@@ -186,7 +186,8 @@ function Install-Dependencies {
     $libs = @(
         "Adafruit TinyUSB Library",
         "XENSIV 3D Magnetic Sensor TLx493D",
-        "Adafruit NeoPixel" 
+        "Adafruit NeoPixel",
+        "Adafruit MCP23017 Arduino Library"
     )
 
     foreach ($lib in $libs) {

@@ -17,7 +17,10 @@
 #define PREVENTIVE_RESET_INTERVAL 0
 
 // --- MCP23017 ---
+// The address is set in UserConfig.h. This fallback only applies if it is missing there.
+#ifndef MCP23017_I2C_ADDRESS
 #define MCP23017_I2C_ADDRESS 0x20
+#endif
 
 Adafruit_MCP23X17 mcp;
 bool mcpAvailable = false;
@@ -28,13 +31,16 @@ Adafruit_NeoPixel strip(NUM_ADDRESSABLE_LEDS, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800
 // --- HARDWARE GLOBALS ---
 const uint8_t physPins[] = {BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN, BUTTON4_PIN};
 const uint8_t physToHID[] = {13, 14, 15, 16};
-bool currentButtonState[] = {false, false, false, false};
-bool prevButtonState[] = {false, false, false, false};
 
 const uint8_t mcpPins[] = {MENU_PIN,FIT_PIN,LOCK_PIN,ESC_PIN,CTRL_PIN,ALT_PIN,SHIFT_PIN,TOP_Quickview_PIN,RIGHT_Quickview_PIN,FRONT_Quickview_PIN,ROTATION_PIN};
 const uint8_t mcpToHID[] = {1, 2, 27, 23, 26, 24, 25, 3, 5, 6, 9};
-bool currentMcpButtonState[] = {false, false, false, false, false, false, false, false, false, false, false};
-bool prevMcpButtonState[]    = {false, false, false, false, false, false, false, false, false, false, false};
+const uint8_t MCP_BUTTON_COUNT = sizeof(mcpPins) / sizeof(mcpPins[0]);
+static_assert(sizeof(mcpPins) == sizeof(mcpToHID), "mcpPins and mcpToHID must have the same length");
+static_assert(sizeof(physPins) == sizeof(physToHID), "physPins and physToHID must have the same length");
+
+// State of all 32 HID buttons: bit (n-1) = HID button n.
+// The whole mask goes out in every button report, so buttons held together stay held.
+uint32_t sentButtonMask = 0;
 
 // --- DATA STRUCTURES ---
 struct MagCalibration {
@@ -182,15 +188,37 @@ void calibrateMagnetometer() {
   }
 }
 
-void setButtonStateHID(uint8_t hidButton, bool pressed) {
-  if (!TinyUSBDevice.mounted()) return;
+static inline uint32_t hidButtonBit(uint8_t hidButton) {
+  return (hidButton >= 1 && hidButton <= 32) ? (1UL << (hidButton - 1)) : 0;
+}
 
-  uint8_t report[4] = {0, 0, 0, 0};
-  if (pressed && hidButton >= 1 && hidButton <= 32) {
-    report[(hidButton - 1) / 8] = (1 << ((hidButton - 1) % 8));
+// Sends the state of all buttons. Returns false if the report could not be sent.
+bool sendButtonReport(uint32_t mask) {
+  if (!TinyUSBDevice.mounted() || !usb_hid.ready()) return false;
+
+  uint8_t report[4] = {
+    (uint8_t)(mask), (uint8_t)(mask >> 8),
+    (uint8_t)(mask >> 16), (uint8_t)(mask >> 24)
+  };
+  return usb_hid.sendReport(3, report, 4);
+}
+
+uint32_t readButtonMask() {
+  uint32_t mask = 0;
+
+  for (uint8_t i = 0; i < sizeof(physPins); i++) {
+    if (digitalRead(physPins[i]) == LOW) mask |= hidButtonBit(physToHID[i]);
   }
 
-  if (usb_hid.ready()) usb_hid.sendReport(3, report, 4);
+  if (mcpAvailable) {
+    // One I2C transaction for all 16 pins: bit n = MCP pin n (A0..A7 = 0..7, B0..B7 = 8..15)
+    uint16_t gpio = mcp.readGPIOAB();
+    for (uint8_t i = 0; i < MCP_BUTTON_COUNT; i++) {
+      if (!(gpio & (1U << mcpPins[i]))) mask |= hidButtonBit(mcpToHID[i]);
+    }
+  }
+
+  return mask;
 }
 
 void send_tx_rx_reports(int16_t tx, int16_t ty, int16_t tz, int16_t rx, int16_t ry, int16_t rz) {
@@ -273,7 +301,7 @@ void setup() {
   Serial.begin(115200);
 #endif
 
-  for (uint8_t i = 0; i < 4; i++) {
+  for (uint8_t i = 0; i < sizeof(physPins); i++) {
     pinMode(physPins[i], INPUT_PULLUP);
   }
 
@@ -293,7 +321,7 @@ void setup() {
 
   mcpAvailable = mcp.begin_I2C(MCP23017_I2C_ADDRESS, &Wire1);
   if (mcpAvailable) {
-    for (uint8_t i = 0; i < (sizeof(mcpPins) / sizeof(mcpPins[0])); i++) {
+    for (uint8_t i = 0; i < MCP_BUTTON_COUNT; i++) {
       mcp.pinMode(mcpPins[i], INPUT_PULLUP);
     }
   }
@@ -320,22 +348,11 @@ void setup() {
 }
 
 void loop() {
-  for (uint8_t i = 0; i < 4; i++) {
-    currentButtonState[i] = (digitalRead(physPins[i]) == LOW);
-    if (currentButtonState[i] != prevButtonState[i]) {
-      setButtonStateHID(physToHID[i], currentButtonState[i]);
-      prevButtonState[i] = currentButtonState[i];
-    }
-  }
-
-  if (mcpAvailable) {
-    for (uint8_t i = 0; i < (sizeof(mcpPins) / sizeof(mcpPins[0])); i++) {
-      currentMcpButtonState[i] = (mcp.digitalRead(mcpPins[i]) == LOW);
-      if (currentMcpButtonState[i] != prevMcpButtonState[i]) {
-        setButtonStateHID(mcpToHID[i], currentMcpButtonState[i]);
-        prevMcpButtonState[i] = currentMcpButtonState[i];
-      }
-    }
+  uint32_t buttonMask = readButtonMask();
+  // Only remember the state once it has really been sent, so a busy USB endpoint
+  // retries on the next loop instead of losing a press/release.
+  if (buttonMask != sentButtonMask && sendButtonReport(buttonMask)) {
+    sentButtonMask = buttonMask;
   }
 
   if (activeSensor) {
